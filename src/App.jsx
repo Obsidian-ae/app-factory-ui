@@ -119,6 +119,8 @@ function IntakeForm({ meta, onBuilt }) {
         <div className="grid grid-cols-2 gap-x-3">
           <Field label="Preset"><Sel value={f.preset} onChange={changePreset}>{Object.keys(meta.presets).map((p) => <option key={p} value={p}>{p}</option>)}</Sel></Field>
           <Field label="Package tier"><Inp value={f.tier} onChange={set("tier")} /></Field>
+          <Field label="Monthly price (AED)" hint="What this client is actually billed via Stripe checkout."><Inp type="number" min="0" step="1" value={f.monthly_price_aed} onChange={set("monthly_price_aed")} /></Field>
+          <Field label="AI spend cap (USD/month)"><Inp type="number" min="0" step="1" value={f.ai_spend_cap} onChange={set("ai_spend_cap")} /></Field>
         </div>
         <Field label="Modules" hint="Adjust individual modules away from the preset default if needed.">
           <div className="grid grid-cols-2 gap-1.5">
@@ -300,6 +302,7 @@ function FleetPanel({ meta, onOpenBuild }) {
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(null); // slug currently showing the destroy-confirmation row
   const [confirmText, setConfirmText] = useState("");
+  const [handover, setHandover] = useState({}); // slug -> null (loading) | { error } | { frontend_url, admin_email, admin_password, checkout_url }
 
   const load = () => api("/api/clients").then(setClients);
   useEffect(() => { load(); }, []);
@@ -318,6 +321,16 @@ function FleetPanel({ meta, onOpenBuild }) {
     if (confirmText !== slug) return;
     setConfirming(null); setConfirmText("");
     await withBusy(slug, () => api("/api/clients/" + slug + "/destroy", { method: "POST", body: { confirm: slug } }))();
+  };
+  const toggleHandover = (slug) => async () => {
+    if (handover[slug] !== undefined) { setHandover((h) => { const n = { ...h }; delete n[slug]; return n; }); return; }
+    setHandover((h) => ({ ...h, [slug]: null }));
+    try {
+      const data = await api("/api/clients/" + slug + "/handover-info");
+      setHandover((h) => ({ ...h, [slug]: data }));
+    } catch (e) {
+      setHandover((h) => ({ ...h, [slug]: { error: e.message } }));
+    }
   };
 
   if (!clients) return <div className="text-sm text-stone-500">Loading…</div>;
@@ -372,10 +385,29 @@ function FleetPanel({ meta, onOpenBuild }) {
                       <Btn small kind="ghost" disabled={busy[c.slug]} onClick={toggleSub(c.slug, c.subscription_status)}>
                         {c.subscription_status === "suspended" ? "Resume" : "Suspend"}
                       </Btn>
+                      <Btn small kind="ghost" onClick={toggleHandover(c.slug)}>Handover</Btn>
                       <Btn small kind="danger" disabled={busy[c.slug]} onClick={() => { setConfirming(c.slug); setConfirmText(""); }}><Trash2 size={12} /></Btn>
                     </div>
                   </td>
                 </tr>
+                {handover[c.slug] !== undefined && (
+                  <tr className="border-b border-stone-900 bg-stone-900/40">
+                    <td colSpan={6} className="py-2.5 px-3">
+                      {handover[c.slug] === null ? (
+                        <div className="text-xs text-stone-500">Loading…</div>
+                      ) : handover[c.slug].error ? (
+                        <div className="text-xs text-red-300">{handover[c.slug].error}</div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                          <div><span className="text-stone-500">App URL: </span><span className="text-stone-200 select-all">{handover[c.slug].frontend_url}</span></div>
+                          <div><span className="text-stone-500">Admin email: </span><span className="text-stone-200 select-all">{handover[c.slug].admin_email || "—"}</span></div>
+                          <div><span className="text-stone-500">Admin password: </span><span className="text-stone-200 select-all">{handover[c.slug].admin_password}</span></div>
+                          <div><span className="text-stone-500">Payment link: </span><span className="text-stone-200 select-all break-all">{handover[c.slug].checkout_url}</span></div>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
                 {confirming === c.slug && (
                   <tr className="border-b border-stone-900 bg-red-950/20">
                     <td colSpan={6} className="py-2.5 px-3">
