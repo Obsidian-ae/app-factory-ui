@@ -48,10 +48,39 @@ function IntakeForm({ meta, onBuilt }) {
     preset: "services", modules: null,
     admin_name: "", admin_email: "", staff_seats: 2,
     tier: "standard", monthly_price_aed: 499, ai_spend_cap: 15,
+    logo_data_url: null,
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+
+  // Converts whatever image format was uploaded to a PNG data URL (matches
+  // logo_file's fixed "logo.png") and caps it at 512px on the long edge —
+  // keeps the payload small and avoids shipping an oversized image into
+  // the client's app repo. Canvas re-encoding also guards against a
+  // mismatched extension (e.g. a .jpg renamed to .png).
+  const handleLogoFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Logo must be an image file."); return; }
+    if (file.size > 5 * 1024 * 1024) { setError("Logo file is too large (max 5MB)."); return; }
+    setError("");
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const scale = Math.min(1, 512 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx2d = canvas.getContext("2d");
+        ctx2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setF((prev) => ({ ...prev, logo_data_url: canvas.toDataURL("image/png") }));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const preset = meta.presets[f.preset] || {};
   const modules = f.modules || preset;
@@ -80,7 +109,7 @@ function IntakeForm({ meta, onBuilt }) {
         package: { tier: f.tier, monthly_price_aed: Number(f.monthly_price_aed), ai_monthly_spend_cap_usd: Number(f.ai_spend_cap) },
         template_version: "1.0.0",
       };
-      const { buildId } = await api("/api/builds", { method: "POST", body: config });
+      const { buildId } = await api("/api/builds", { method: "POST", body: { ...config, logo_data_url: f.logo_data_url } });
       onBuilt(buildId);
     } catch (e) { setError(e.message); }
     setBusy(false);
@@ -106,6 +135,12 @@ function IntakeForm({ meta, onBuilt }) {
           <Field label="Primary color"><input type="color" value={f.color_primary} onChange={set("color_primary")} className="h-9 w-full rounded-lg border border-stone-800 bg-stone-900" /></Field>
           <Field label="Dark background color"><input type="color" value={f.color_bg_dark} onChange={set("color_bg_dark")} className="h-9 w-full rounded-lg border border-stone-800 bg-stone-900" /></Field>
         </div>
+        <Field label="Logo" hint="PNG/JPG/SVG, any size — resized automatically. Falls back to a plain placeholder if skipped.">
+          <div className="flex items-center gap-3">
+            {f.logo_data_url && <img src={f.logo_data_url} alt="logo preview" className="h-9 w-9 rounded object-contain bg-stone-900 border border-stone-800" />}
+            <input type="file" accept="image/*" onChange={handleLogoFile} className="text-xs text-stone-400 file:mr-3 file:rounded-lg file:border file:border-stone-800 file:bg-stone-900 file:px-3 file:py-1.5 file:text-xs file:text-stone-100 file:cursor-pointer" />
+          </div>
+        </Field>
 
         <h2 className="text-sm font-semibold text-stone-200 mb-3 mt-2">Business rules</h2>
         <div className="grid grid-cols-2 gap-x-3">
@@ -146,7 +181,9 @@ function IntakeForm({ meta, onBuilt }) {
         <h2 className="text-sm font-semibold text-stone-200 mb-3">Live preview</h2>
         <div className="rounded-2xl border border-stone-800 overflow-hidden sticky top-4" style={{ backgroundColor: f.color_bg_dark }}>
           <div className="p-5 flex items-center gap-2 border-b" style={{ borderColor: f.color_primary + "33" }}>
-            <div className="h-6 w-6 rounded" style={{ backgroundColor: f.color_primary }} />
+            {f.logo_data_url
+              ? <img src={f.logo_data_url} alt="" className="h-6 w-6 rounded object-contain" />
+              : <div className="h-6 w-6 rounded" style={{ backgroundColor: f.color_primary }} />}
             <div className="font-semibold text-sm" style={{ color: "#f5f5f4" }}>{f.business_name || "Your Business"}</div>
           </div>
           <div className="p-5 space-y-3">
